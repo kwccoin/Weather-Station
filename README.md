@@ -2,6 +2,7 @@
 Weather Station for Raspberry Pi 3 B+
 
 Sensors:
+
 BME 280 Temperature, Pressure, Humidity (I2C)
 
 VEML 6075 UVA, UVB, UV-index (I2C)
