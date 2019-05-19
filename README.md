@@ -13,60 +13,60 @@ SparkFun  SEN-08942
 
 Data send Weather Underground and Időkép
 
-Időjárás állomas Raspberry Pi 3 B+ (c) 2019
-Készítette: CiniBN Hungary (HU)
+Weather Forecast Raspberry Pi 3 B + (c) 2019
+By CiniBN Hungary (HU)
 
-Verzió: Python BNWS 5.1
-- Eső tárolók használata MySql szerver segítségével
-- MySql tábla törlése havonta
+Version: Python BNWS 5.1
+- Use of Rain Containers with MySql Server
+- Delete MySql Table Monthly
 
-Verzió: Python BNWS 5.0
-- MySql connector hozzáadása
-- Adatok feltöltése a MySql szerverre
+Version: Python BNWS 5.0
+- Adding MySql connector
+- Uploading data to the MySql server
 
-Verzió: Python BNWS 4.3
-- Adatfeltöltés hibakezelés
-- E-mail küldés hiba esetén
+Version: Python BNWS 4.3
+- Data upload error handling
+- Send email in case of error
 
-Verzió: Python BNWS 4.2
-- Adatfeltöltés hibakezelés javítása
+Version: Python BNWS 4.2
+- Improve data upload error handling
 
-Verzió: Python BNWS 4.1
-- Adatfeltöltés hibakezelés hozzáadása
+Version: Python BNWS 4.1
+- Adding data upload error handling
 
-Verzió: Python BNWS 4.0
-- PM1 por mérés hozzáadása
-- Tengerszintre számított nyomás hozzáadása
+Version: Python BNWS 4.0
+- Adding PM1 powder measurement
+- Add pressure to sea level
 
-Verzió: Python BNWS 3.3
-- UV értékek folyamatos olvasása, tárolóba helyezése, számítása
+Version: Python BNWS 3.3
+- Continuous reading, storage and calculation of UV values
 
-Verzió: Python BNWS 3.2
-- Hőmérséklet, páratartalom, nyomás, magasság kód hibajavítás, közvetlen elérés kódolása
+Version: Python BNWS 3.2
+- Temperature, humidity, pressure, height code error correction, direct access coding
 
-Verzió: Python BNWS 3.1
-- UVA, UVB, UVIndex kód hibajavítás, közvetlen elérés kódolása
+Version: Python BNWS 3.1
+- UVA, UVB, UVIndex code error correction, direct access coding
 
-Verzió: Python BNWS 3.0
+Version: Python BNWS 3.0
 - UVA, UVB, UVIndex
 
-Verzió: Python BNWS 2.1
- - Időkép adatküldés leállítása
+Version: Python BNWS 2.1
+ - Stop Idókép data sending
  
-Verzió: Python BNWS 2.0
- - Időkép adatküldés
+Version: Python BNWS 2.0
+ - Idókép to send data
  
-Verzió: Python BNWS 1.0
- - PMS7003 szenzor telepítése
- - PM2.5, PM10 részecskék mérése
+Version: Python BNWS 1.0
+ - Installing a PMS7003 sensor
+ - Measuring PM2.5, PM10 particles
  
-Verzió: Python BNWS 0.2
- - WeatherUnderground adatküldés
+Version: Python BNWS 0.2
+ - WeatherUnderground sending data
  
-Verzió: Python BNWS 0.1
- - SparkFun  SEN-08942 Időjárás állomás telepítése
- - Szélsebesség, széllökés, szélirány, eső mérése
+Version: Python BNWS 0.1
+ - SparkFun SEN-08942 Weather Station Installation
+ - Wind speed, wind gust, wind direction, rain measurement
  
-Verzió: Python BNWS 0.0
- - BM280 érzékelő
- - Hőmérséklet, páratartlom, nyomás mérése
+Version: Python BNWS 0.0
+ - BM280 sensor
+ - Measuring temperature, humidity, pressure
