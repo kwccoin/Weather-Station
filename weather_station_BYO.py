@@ -25,6 +25,24 @@ SOFTWARE.
 Időjárás állomas Raspberry Pi 3 B+ (c) 2019
 Készítette: Bajusz Norbert Hungary (HU)
 
+Verzió: Python BNWS 5.1
+- Eső tárolók használata MySql szerver segítségével
+- MySql tábla törlése havonta
+
+Verzió: Python BNWS 5.0
+- MySql connector hozzáadása
+- Adatok feltöltése a MySql szerverre
+
+Verzió: Python BNWS 4.3
+- Adatfeltöltés hibakezelés
+- E-mail küldés hiba esetén
+
+Verzió: Python BNWS 4.2
+- Adatfeltöltés hibakezelés javítása
+
+Verzió: Python BNWS 4.1
+- Adatfeltöltés hibakezelés hozzáadása
+
 Verzió: Python BNWS 4.0
 - PM1 por mérés hozzáadása
 - Tengerszintre számított nyomás hozzáadása
@@ -66,8 +84,9 @@ Verzió: Python BNWS 0.0
 # KÖNYVTÁRAK, SEGEDPROGRAMOK IMPORTÁLÁSA:
 
 from gpiozero import Button, LED
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
+from time import strftime
 import os
 import statistics
 import requests
@@ -79,6 +98,8 @@ import busio
 import adafruit_bme280
 import adafruit_veml6075
 from pms7003 import PMS7003
+import smtplib
+import mysql.connector
 
 # ALAPÉRTEKEK MEGADASA:
 
@@ -88,8 +109,6 @@ store_directions = []                   # Szélirány tároló
 store_uvi = []                          # UV-index tároló
 store_uva = []                          # UVA tároló
 store_uvb = []                          # UVB tároló
-rainh = []                              # Eső tároló órai
-raind = []                              # Eső tároló napi
 wind_count = 0                          # Szél számláló                         
 rain_count = 0                          # Eső számláló
 gust = 0                                # Szélirány 
@@ -109,22 +128,36 @@ gamma = 0.0065                          # Függőleges hőmérsékleti gradiens
 s = 0                                   # Ciklusszámláló PMS7003 indítására
 n = 0                                   # Ciklusszámláló képernyőtörlésre
 
+port = 587                                      # gmail port
+username = "XXXX.gamil.com"                     # gmail felhasználónév
+password = "XXXXX"                              # gmail jelszó
+from_email = "XXXX@gmail.com"        # küldő emailcíme
+to_email = "XXX@XXX.XX"               # fogadó emailcím
+
+mysql_aut = {
+    'user': 'weather',
+    'password': 'station',
+    'host': '192.168.1.10',
+    'database': 'weather',
+    'raise_on_warnings': True
+}                                          # MySql autentikáció
+
 i2c = busio.I2C(board.SCL, board.SDA)
 
 # A www.wunderground.com-ra küldés URL első felének megadása
 WUurl = "https://weatherstation.wunderground.com/weatherstation\
 /updateweatherstation.php?"
-WU_station_id = "YOUR STATION ID"               # állomas ID
-WU_station_pwd = "YOUR STATION PASSWORD"             # állomas jelszó
+WU_station_id = "XXXXX"               # állomas ID
+WU_station_pwd = "XXXXX"             # állomas jelszó
 WUcreds = "ID=" + WU_station_id + "&PASSWORD="+ WU_station_pwd
 date_str = "&dateutc=now"
 action_str = "&action=updateraw"
-softwaretype_str = "Python BNWS 4.0"
+softwaretype_str = "Python BNWS 5.1"
 
 # A www.időkép.hu-ra küldés URL első felének megadása
 #ID_url = "https://automata.idokep.hu/sendws.php?"
-#ID_user = "YOUR USER NAME"                  # felhsználónév
-#ID_pwd = "YOUR PASSWORD"                 # jelszó
+#ID_user = "XXXX"                  # felhsználónév
+#ID_pwd = "XXXXX"                 # jelszó
 #ID_creds = "user=" + ID_user + "&pass="+ ID_pwd
 #ID_utc = "&0"
 #ID_type = "&RaspberryPi"
@@ -132,11 +165,11 @@ softwaretype_str = "Python BNWS 4.0"
 
 # A www.időkép.hu-ra küldés URL első felének megadása a PM2,5 és PM10 értékeknek
 IDPM_url = "https://automata.idokep.hu/sendszmog.php?"
-IDPM_id = "XXXX"			# YOUR ID
-IDPM_varos = "XXXXXXXX"		# YOUR CITY
-IDPM_helyseg = "XXXXXX"		# YOUR PLACE
-IDPM_eszel = "XX.XX"		# YOUR northern latitude
-IDPM_khossz = "XX.XX"		# YOUR east length
+IDPM_id = "XXXX"
+IDPM_varos = "XXXXX"
+IDPM_helyseg = "XXXXX"
+IDPM_eszel = "XX.XX"
+IDPM_khossz = "XX.XX"
 IDPM_action_str = "&action=updateraw"
 
 
@@ -209,6 +242,8 @@ def kmh_to_ms(speed_in_kmh):                               # km/h konvertálása
     speed_in_ms = speed_in_kmh / 3.6
     return speed_in_ms
 
+
+
 # HUROK DEFINIÁLÁSA:
                                                                                                            
 while True:
@@ -220,6 +255,7 @@ while True:
     #Szélsebesség, széllokés kiszámolása:
     upload_time = time.time()
     while time.time() - upload_time <= upload_interval:                     # 5 percenkénti upload ciklus
+        dt = datetime.now()
         wind_start_time = time.time()
         reset_wind()
         #time.sleep(wind_interval)
@@ -227,10 +263,10 @@ while True:
             store_directions.append(wind_direction_byo.get_value())
             
             s+= 1                                                           # PMS7003 indítása az adatküldés előtt
-            if s  >= 53:                                                    # 30 másodperccel
+            if s  >= 49:                                                    # 30 másodperccel
                 pms.on()
             print(s)
-            if s == 53:
+            if s == 49:
                 print("PMS7003 indítása!")
 
             veml = adafruit_veml6075.VEML6075(i2c, integration_time=100)    # UV értékek
@@ -240,7 +276,7 @@ while True:
             uva = max(store_uva)                                            # Maximális UVA számítása
             uvb = max(store_uvb)                                            # Maximális UVB számítása
             uv_index = max(store_uvi)                                       # Maximális UV-index számítása
-            int_time = veml.integration_time                        # Integrálási idő kiolvasás
+            int_time = veml.integration_time                                # Integrálási idő kiolvasás
                                
         final_speed = calculate_speed(wind_interval)
         store_speeds.append(final_speed)
@@ -252,34 +288,44 @@ while True:
 
     # Eső kiszámolása:
     rainf = rain_count * BUCKET_SIZE
-    t = time.asctime(time.localtime(time.time()))
 
-    with open('/media/pi/B415-25E9/rain.txt',mode='a') as x:                # Eső érték fájba írása, csak az utolsó sor hozzáadása
-         x.write(str(t) + ' ' + str(rainf) + ' ' + '\n,')
+    t_stop_dailyrain = dt  - timedelta(minutes=5)                           # Napi eső start időpont (jelenlegi idő)
+    t_start_dailyrain = dt - timedelta(days=1) - timedelta(minutes=5)       # Napi eső stop időpont (jelenlegi idő - 1 nap)
+    t_stop_rainfall = dt - timedelta(minutes=5)                             # 1 órai eső start időpont (jelenlegi idő)
+    t_start_rainfall = dt - timedelta(hours=1) - timedelta(minutes=5)       # 1 órai eső stop időpont (jelenlegi idő - 1 óra)
 
-    lines = open('/media/pi/B415-25E9/rain.txt').readlines()                # Az első sor törlése
-    open('/media/pi/B415-25E9/raintmp.txt', 'w').writelines(lines[1:-1])
-    os.remove("/media/pi/B415-25E9/rain.txt")                               # Fájlcsere
-    os.rename("/media/pi/B415-25E9/raintmp.txt", "/media/pi/B415-25E9/rain.txt")
+   
+    try:
+        db = mysql.connector.connect(**mysql_aut)
     
-    with open('/media/pi/B415-25E9/rain.txt') as f:                     
-        sorok = f.readlines()
-        for i in range(12):                                                 # Elmúlt 1 órai eső kiszámolása
-            h = float(sorok[275 + i].split()[5])
-            rainh.append(h)
-            
-    rainfall = sum(rainh)
-    rainh = []
-    
-    with open('/media/pi/B415-25E9/rain.txt') as f:
-        for y in range(288):                                                # Elmúlt 1 napi eső kiszámolása
-            d = float(sorok[y].split()[5])
-            raind.append(d)
-            
-    dailyrain = sum(raind)
-    raind = []
-    
-    reset_rainfall()
+    except mysql.connector.Error as err:
+      if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+        print("Hibás felhasználónév vagy jelszó!")
+      elif err.errno == errorcode.ER_BAD_DB_ERROR:
+        print("Adatbázis nem megfelelő!")
+      else:
+        print(err)
+    else:
+        db.reconnect(attempts=5, delay=30)
+
+    cursor = db.cursor()
+
+    sql_read = ("SELECT rainf FROM WEATHER_MEASUREMENT WHERE dt BETWEEN %s AND %s")
+
+    cursor.execute(sql_read, (t_start_dailyrain, t_stop_dailyrain))
+    result_dailyrain = cursor.fetchall()
+
+    cursor.execute(sql_read, (t_start_rainfall, t_stop_rainfall))
+    result_rainfall = cursor.fetchall()
+
+    cursor.close()
+    db.close()
+
+    list_dailyrain = list(result_dailyrain)
+    list_rainfall = list(result_rainfall)
+    dailyrain = sum([list_dailyrain[0] for list_dailyrain in list_dailyrain])
+    rainfall = sum([list_rainfall[0] for list_rainfall in list_rainfall])
+        
                           
     # Tárolók törlése:
     store_speeds = []
@@ -287,6 +333,7 @@ while True:
     store_uva = []
     store_uvb = []
     store_uvi = []
+    reset_rainfall()
 
     # Páratartalom, légnyomas, hőmérséklet:
     bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c)
@@ -309,7 +356,7 @@ while True:
     dewp_c = c * gamma / (b - gamma)
 
  
-    #PMS7003 => PM2.5, PM10
+    #PMS7003 => PM2.5, PM10, PM1
     dust = PMS7003()
     ser = serial.Serial('/dev/ttyS0', 9600, timeout = 1)
     buffer = ser.read(1024)
@@ -355,8 +402,7 @@ while True:
     print('PM1              ', pm1, 'ug/m3')
     print('PM2.5:           ', pm2_5, 'ug/m3')
     print('PM10:            ', pm10, 'ug/m3')
-    ido = datetime.now()
-    print (ido)
+    print(dt)
 
     # WU küldött adatok formai követelményeinek összeállítása
     ambient_temp_str = "{0:.2f}".format(degc_to_degf(ambient_temp))
@@ -386,53 +432,65 @@ while True:
     print('UV-index:     ', uvi_str)
     print('PM2.5:        ', AqPM2_5_str, 'ug/m3')
     print('PM10:         ', AqPM10_str, 'ug/m3')
-    ido = datetime.now()
-    print (ido)
+    print(dt)
+
 
     # Adatküldés a www.wundwerground.com-ra
-    r= requests.get(
-        WUurl +
-        WUcreds +
-        date_str +
-        "&winddir=" + wind_average_str +                    #[0-360°] pillanatnyi szélirány
-        "&windspeedmph=" + wind_speed_mph_str +             #[mph] azonnali szélsebesség
-        "&windgustmph=" + wind_gust_mph_str +               #[mph] aktuális széllökés, szoftverspecifikus időszak használatával
-    #   "&windgustdir=" + wind_gust_dir_str +                #[0-360°] szoftverspecifikus időszak használatával
-    #   "&windspdmph_avg2m=" + wind_speed_mph_avg2m_str +    #[mph] 2 perc átlagos szélsebesség
-    #   "&winddir_avg2m=" + wind_dir_avg2m_str +             #[0-360°] 2 perces átlagos szélirány
-    #   "&windgustmph_10m=" + wind_gust_mph_10m_str +        #[mph] 10 perces átlagos széllökés
-    #   "&windgustdir_10m=" + wind_gust_dir_10m_str +        #[0-360°] 10 perces átlagos szélirány
-        "&humidity=" + humidity_str +                       #[0-100%] kültéri páratartalom
-        "&dewptf=" + dewp_f_str +                           #[F°] kültéri harmatpont
-        "&tempf=" + ambient_temp_str +                      #[F°] kültéri hőmérséklet
-        "&rainin=" + rainfall_in_str +                      #[inch] az elmúlt órában esett eső
-        "&dailyrainin=" + dailyrain_in_str +                #[inch] az elmúlt napban esett eső az aktuális helyi idő szerint
-        "&baromin=" + pressure_in_str +                     #[inch] barometikus nyomás
-    #   "&weather=" + weather_str +                          #[szöveg] Lásd: METAR Wikipédia
-    #   "&clouds=" + clouds_str +                            #[szöveg] Lásd: METAR Wikipédia
-    #   "&soiltempf=" + soil_temp_str +                      #[F°] talajhőmérséklet
-    #   "&soilmoisture=" + soil_moisture_str +               #[0-100%] talajnedveség
-    #   "&leafwetness=" + leafwetness_str +                  #[0-100%] levélszárazság
-    #   "&solarradiation=" + solar_radiation_str +           #[W/m2] napsugárzás
-        "&UV=" + uvi_str +                                   #[index] UV-index
-    #   "&visibility=" + visiblity_str +                     #[nm] láthatóság
-    #   "&indoortempf=" + indoor_tempf_str +                 #[F°] beltéri hőmérséklet
-    #   "&indoorhumidity=" + indoor_humidity_str +           #[0-100%] beltéri páratartalom
-        "&AqPM2.5=" + AqPM2_5_str +                         #[ug/m3] PM 2.5 részecskék
-        "&AqPM10=" + AqPM10_str +                           #[ug/m3] PM 10 részecskék
-        "&softwaretype=" + softwaretype_str +
-        action_str)
+    try:
+        r= requests.get(
+            WUurl +
+            WUcreds +
+            date_str +
+            "&winddir=" + wind_average_str +                    #[0-360°] pillanatnyi szélirány
+            "&windspeedmph=" + wind_speed_mph_str +             #[mph] azonnali szélsebesség
+            "&windgustmph=" + wind_gust_mph_str +               #[mph] aktuális széllökés, szoftverspecifikus időszak használatával
+        #   "&windgustdir=" + wind_gust_dir_str +                #[0-360°] szoftverspecifikus időszak használatával
+        #   "&windspdmph_avg2m=" + wind_speed_mph_avg2m_str +    #[mph] 2 perc átlagos szélsebesség
+        #   "&winddir_avg2m=" + wind_dir_avg2m_str +             #[0-360°] 2 perces átlagos szélirány
+        #   "&windgustmph_10m=" + wind_gust_mph_10m_str +        #[mph] 10 perces átlagos széllökés
+        #   "&windgustdir_10m=" + wind_gust_dir_10m_str +        #[0-360°] 10 perces átlagos szélirány
+            "&humidity=" + humidity_str +                       #[0-100%] kültéri páratartalom
+            "&dewptf=" + dewp_f_str +                           #[F°] kültéri harmatpont
+            "&tempf=" + ambient_temp_str +                      #[F°] kültéri hőmérséklet
+            "&rainin=" + rainfall_in_str +                      #[inch] az elmúlt órában esett eső
+            "&dailyrainin=" + dailyrain_in_str +                #[inch] az elmúlt napban esett eső az aktuális helyi idő szerint
+            "&baromin=" + pressure_in_str +                     #[inch] barometikus nyomás
+        #   "&weather=" + weather_str +                          #[szöveg] Lásd: METAR Wikipédia
+        #   "&clouds=" + clouds_str +                            #[szöveg] Lásd: METAR Wikipédia
+        #   "&soiltempf=" + soil_temp_str +                      #[F°] talajhőmérséklet
+        #   "&soilmoisture=" + soil_moisture_str +               #[0-100%] talajnedveség
+        #   "&leafwetness=" + leafwetness_str +                  #[0-100%] levélszárazság
+        #   "&solarradiation=" + solar_radiation_str +           #[W/m2] napsugárzás
+            "&UV=" + uvi_str +                                   #[index] UV-index
+        #   "&visibility=" + visiblity_str +                     #[nm] láthatóság
+        #   "&indoortempf=" + indoor_tempf_str +                 #[F°] beltéri hőmérséklet
+        #   "&indoorhumidity=" + indoor_humidity_str +           #[0-100%] beltéri páratartalom
+            "&AqPM2.5=" + AqPM2_5_str +                         #[ug/m3] PM 2.5 részecskék
+            "&AqPM10=" + AqPM10_str +                           #[ug/m3] PM 10 részecskék
+            "&softwaretype=" + softwaretype_str +
+            action_str)
 
-    print("Received " + str(r.status_code) + " " + str(r.text))
+    
+        print("Received " + str(r.status_code) + " " + str(r.text))
+    except Exception as e:
+        print(e)
+        with open('/media/pi/B415-25E9/error.txt',mode='a') as ew:                
+         ew.write(str(dt) + str(e) + '\n')
+        server = smtplib.SMTP('smtp.gmail.com', port)
+        server.starttls()
+        server.login(username, password)
+        msg = ("Weaher Underground adatküldés hiba!", e)
+        server.sendmail(from_email, to_email, msg)
+        server.quit()
+        
 
 #    # ID küldött adatok formai követelményeinek összeállítása
-#    now = datetime.now()
-#    year = now.strftime("%Y")
-#    month = now.strftime("%m")
-#    day = now.strftime("%d")
-#    hour = now.strftime("%H")
-#    minute = now.strftime("%M")
-#    secound = now.strftime("%S")
+#    year = dt.strftime("%Y")
+#    month = dt.strftime("%m")
+#    day = dt.strftime("%d")
+#    hour = dt.strftime("%H")
+#    minute = st.strftime("%M")
+#    secound = dt.strftime("%S")
 #    ambient_temp_ID_str = "{0:.2f}".format(ambient_temp)
 #    humidity_ID_str = "{0:.2f}".format(humidity)
 #    wind_average_ID_str = "{0:.2f}".format(wind_average)
@@ -456,50 +514,119 @@ while True:
 #    print('Légnyomás:    ', pressure0_ID_str, 'hPa')
 #    print('Hőmérséklet:  ', ambient_temp_ID_str, '°C')
 #    print('Magasság:     ', altitude_ID_str, 'm')
-#    ido = datetime.now()
-#    print (ido)
+#    print(dt)
     
     # Adatküldés a www.időkép.hu-ra
-#    rid= requests.get(
-#        ID_url +
-#        ID_creds +
-#        ID_utc +
-#        ID_type +
-#        "&ev=" + year +                                         # Év
-#        "&honap=" + month +                                     # Hónap
-#        "&nap=" + day +                                         # Nap
-#        "&ora=" + hour +                                        # Óra
-#        "&perc=" + minute +                                     # Perc
-#        "&mp=" + secound +                                      # Másodperc
-#        "&hom=" + ambient_temp_ID_str +                         # [°C] Hőmérséklet
-#        "&rh=" + humidity_ID_str +                              # [0-100%] Páratartalom 
-#        "&szelirany=" + wind_average_ID_str +                   # [0-360°] Szélitány
-#        "&szelero=" + wind_speed_ms_str +                       # [m/s] Szélsebesség
-#        "&szellokes=" + wind_gust_ms_str +                      # [m/s] Széllökés
-#        "&csap=" + dailyrain_ID_str +                           # [mm] Az elmúlt 1 napban eset eső
-#        "&csap1h=" + rainfall_ID_str +                          # [mm] Az elmúlt 1 órában esett eső
-#        "&p=" + pressure0_ID_str +                               # [hPa] Tengerszintre számított légnyomás
-#        "&ap=" + pressure_ID_str +                              # [hPa] Műszerszinti légnyomás
-#        "&uv=" + uv_index_iD_str +                              # [index] UV-index
-#        ID_action_str)
+#    try:
+    #    rid= requests.get(
+    #        ID_url +
+    #        ID_creds +
+    #        ID_utc +
+    #        ID_type +
+    #        "&ev=" + year +                                         # Év
+    #        "&honap=" + month +                                     # Hónap
+    #        "&nap=" + day +                                         # Nap
+    #        "&ora=" + hour +                                        # Óra
+    #        "&perc=" + minute +                                     # Perc
+    #        "&mp=" + secound +                                      # Másodperc
+    #        "&hom=" + ambient_temp_ID_str +                         # [°C] Hőmérséklet
+    #        "&rh=" + humidity_ID_str +                              # [0-100%] Páratartalom 
+    #        "&szelirany=" + wind_average_ID_str +                   # [0-360°] Szélitány
+    #        "&szelero=" + wind_speed_ms_str +                       # [m/s] Szélsebesség
+    #        "&szellokes=" + wind_gust_ms_str +                      # [m/s] Széllökés
+    #        "&csap=" + dailyrain_ID_str +                           # [mm] Az elmúlt 1 napban eset eső
+    #        "&csap1h=" + rainfall_ID_str +                          # [mm] Az elmúlt 1 órában esett eső
+    #        "&p=" + pressure0_ID_str +                              # [hPa] Tengerszintre számított légnyomás
+    #        "&ap=" + pressure_ID_str +                              # [hPa] Műszerszinti légnyomás
+    #        "&uv=" + uv_index_iD_str +                              # [index] UV-index
+    #        ID_action_str)
 
-#    print("Received " + str(rid.status_code) + " " + str(rid.text))
+#        print("Received " + str(rid.status_code) + " " + str(rid.text))
+#    except Exception as eid:
+#        print(eid)
+#        with open('/media/pi/B415-25E9/error.txt',mode='a') as ew:                
+#         ew.write(str(dt) + str(eid) + '\n')
+#        server = smtplib.SMTP('smtp.gmail.com', port)
+#        server.starttls()
+#        server.login(username, password)
+#        msg = ("Időkép adatküldés hiba!", eid)
+#        server.sendmail(from_email, to_email, msg)
+#        server.quit()
+
 
     # Adatküldés a www.időkép.hu-ra, csak a PM értékek
-    dt = datetime.now()                                         # UNIX timestamp előállítása és formázása
-    timestamp = datetime.timestamp(dt)
+    timestamp = datetime.timestamp(dt)                              # UNIX timestamp előállítása és formázása
     ts_str = "{0:.0f}".format(timestamp)
 
-    ridpm = requests.get(
-        IDPM_url +
-        "id=" + IDPM_id +
-        "&pm25=" + AqPM2_5_str +
-        "&pm10=" + AqPM10_str +
-        "&varos=" + IDPM_varos +
-        "&helyseg=" + IDPM_helyseg +
-        "&eszaki=" + IDPM_eszel +
-        "&keleti=" + IDPM_khossz +
-        "&time=" + ts_str +
-        IDPM_action_str)
+    try:
+        ridpm = requests.get(
+            IDPM_url +
+            "id=" + IDPM_id +
+            "&pm25=" + AqPM2_5_str +
+            "&pm10=" + AqPM10_str +
+            "&varos=" + IDPM_varos +
+            "&helyseg=" + IDPM_helyseg +
+            "&eszaki=" + IDPM_eszel +
+            "&keleti=" + IDPM_khossz +
+            "&time=" + ts_str +
+            IDPM_action_str)
+        
+        print("Received " + str(ridpm.status_code) + " " + str(ridpm.text))
+    except Exception as eidpm:
+        print(eidpm)
+        with open('/media/pi/B415-25E9/error.txt',mode='a') as ew:                
+         ew.write(str(dt) + str(eidpm) + '\n')
+        server = smtplib.SMTP('smtp.gmail.com', port)
+        server.starttls()
+        server.login(username, password)
+        msg = ("Időkép PM adatküldés hiba!", eidpm)
+        server.sendmail(from_email, to_email, msg)
+        server.quit()
+
+    # MySql adatfeltöltés
+    try:
+        db = mysql.connector.connect(**mysql_aut)
+    except mysql.connector.Error as err:
+        if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+            print("Hibás felhasználónév vagy jelszó!")
+        elif err.errno == errorcode.ER_BAD_DB_ERROR:
+            print("Adatbázis nem megfelelő!")
+        else:
+            print(err)
+    else:
+        db.reconnect(attempts=5, delay=30)
+       
+    cursor = db.cursor()
+    sql = "INSERT INTO WEATHER_MEASUREMENT (dt, wind_speed, wind_gust, wind_average, rainf, rainfall, dailyrain, humidity, pressure, p0, ambient_temp, dewp_c, altitude, uv_index, uva, uvb, pm1, pm2_5, pm10) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+    val = (dt,
+           wind_speed,
+           wind_gust,
+           wind_average,
+           rainf,
+           rainfall,
+           dailyrain,
+           humidity,
+           pressure,
+           p0,
+           ambient_temp,
+           dewp_c,
+           altitude,
+           uv_index,
+           uva,
+           uvb,
+           pm1,
+           pm2_5,
+           pm10)
+    cursor.execute(sql, val)
     
-    print("Received " + str(ridpm.status_code) + " " + str(ridpm.text))
+    t_delete = dt - timedelta(days=31)
+    sql_delete = ("DELETE FROM WEATHER_MEASUREMENT WHERE dt < %s")
+    cursor.execute(sql_delete, (t_delete,))
+    
+    db.commit()
+    cursor.close()
+    db.close()
+    print(cursor.rowcount, "MySql adatok beillesztése sikeres.", '\n')
+
+   
+
