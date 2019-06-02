@@ -16,6 +16,11 @@ Data send Weather Underground and Időkép
 Weather Forecast Raspberry Pi 3 B + (c) 2019
 By CiniBN Hungary (HU)
 
+Version: Python BMWS 6.0
+- Outsourcing of Weather Underground Data
+- Outsourcing of Időkép data
+- Outsourcing of Időkép PM data
+
 Version: Python BNWS 5.1
 - Use of Rain Containers with MySql Server
 - Delete MySql Table Monthly
