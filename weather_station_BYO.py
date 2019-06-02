@@ -25,6 +25,11 @@ SOFTWARE.
 Időjárás állomas Raspberry Pi 3 B+ (c) 2019
 Készítette: Bajusz Norbert Hungary (HU)
 
+Verzió: Python BNWS 6.0
+- WeatherUnderground adatküldés kiszervezése
+- Időkép adatküldés kiszervezése
+- Időkép PM adatküldés kiszervezése
+
 Verzió: Python BNWS 5.1
 - Eső tárolók használata MySql szerver segítségével
 - MySql tábla törlése havonta
@@ -89,7 +94,6 @@ import time
 from time import strftime
 import os
 import statistics
-import requests
 import serial
 import math
 import wind_direction_byo
@@ -98,11 +102,14 @@ import busio
 import adafruit_bme280
 import adafruit_veml6075
 from pms7003 import PMS7003
-import smtplib
+from send_wu_data import send_wu_data
+#from send_id_data import send_id_data
+from send_id_data import send_idpm_data
 import mysql.connector
 
 # ALAPÉRTEKEK MEGADASA:
 
+softwaretype_str = "Python BNWS 6.0"    # Szoftver verzió
 upload_interval = 300                   # Feltöltés hurokfutás ideje (sec-ban), (300 sec)
 store_speeds = []                       # Szélsebesség tároló
 store_directions = []                   # Szélirány tároló
@@ -128,50 +135,15 @@ gamma = 0.0065                          # Függőleges hőmérsékleti gradiens
 s = 0                                   # Ciklusszámláló PMS7003 indítására
 n = 0                                   # Ciklusszámláló képernyőtörlésre
 
-port = 587                                      # gmail port
-username = "XXXX.gamil.com"                     # gmail felhasználónév
-password = "XXXXX"                              # gmail jelszó
-from_email = "XXXX@gmail.com"        # küldő emailcíme
-to_email = "XXX@XXX.XX"               # fogadó emailcím
-
-mysql_aut = {
+mysql_aut = {                                   # MySql autentikáció
     'user': 'weather',
     'password': 'station',
     'host': '192.168.1.10',
     'database': 'weather',
     'raise_on_warnings': True
-}                                          # MySql autentikáció
+}                                          
 
 i2c = busio.I2C(board.SCL, board.SDA)
-
-# A www.wunderground.com-ra küldés URL első felének megadása
-WUurl = "https://weatherstation.wunderground.com/weatherstation\
-/updateweatherstation.php?"
-WU_station_id = "XXXXX"               # állomas ID
-WU_station_pwd = "XXXXX"             # állomas jelszó
-WUcreds = "ID=" + WU_station_id + "&PASSWORD="+ WU_station_pwd
-date_str = "&dateutc=now"
-action_str = "&action=updateraw"
-softwaretype_str = "Python BNWS 5.1"
-
-# A www.időkép.hu-ra küldés URL első felének megadása
-#ID_url = "https://automata.idokep.hu/sendws.php?"
-#ID_user = "XXXX"                  # felhsználónév
-#ID_pwd = "XXXXX"                 # jelszó
-#ID_creds = "user=" + ID_user + "&pass="+ ID_pwd
-#ID_utc = "&0"
-#ID_type = "&RaspberryPi"
-#ID_action_str = "&action=updateraw"
-
-# A www.időkép.hu-ra küldés URL első felének megadása a PM2,5 és PM10 értékeknek
-IDPM_url = "https://automata.idokep.hu/sendszmog.php?"
-IDPM_id = "XXXX"
-IDPM_varos = "XXXXX"
-IDPM_helyseg = "XXXXX"
-IDPM_eszel = "XX.XX"
-IDPM_khossz = "XX.XX"
-IDPM_action_str = "&action=updateraw"
-
 
 # FÜGGVÉNYEK DEFINIÁLÁSA:
 
@@ -214,36 +186,6 @@ rain_sensor.when_pressed = bucket_tipped                    # Jel eseten Bucket_
 pms = LED(12)                                               #PMS7003 indítására szolgáló kimenet
                                                             # A mérés előtt 30 másodperccel ki kell adni a jelet!
 
-def hpa_to_inches(pressure_in_hpa):                         # hPa konvertálása inch-re nyomás
-    pressure_in_inches_of_m = pressure_in_hpa * 0.0295
-    return pressure_in_inches_of_m
-
-def mm_to_inchesrh(rainfall_in_mm):                         # mm konvertálása inch-be eső órai
-    rainfall_in_inches = rainfall_in_mm * 0.0393701
-    return rainfall_in_inches
-
-def mm_to_inchesrd(dailyrain_in_mm):                        # mm konvertálása inch-be eső napi
-    dailyrain_in_inches = dailyrain_in_mm * 0.0393701
-    return dailyrain_in_inches
-
-def degc_to_degf(temperature_in_c):                         # C fok konvertálása F-re hőmérséklet
-    temperature_in_f = (temperature_in_c * (9/5.0)) + 32
-    return temperature_in_f
-
-def dewpc_to_dewpf(dewp_in_c):                              # C fok konvertálása F-re harmatpont (Dewpoint)
-    dewp_in_f = (dewp_c * (9/5.0)) + 32
-    return dewp_in_f
-
-def kmh_to_mph(speed_in_kmh):                               # km/h konvertálása mph-ba
-    speed_in_mph = speed_in_kmh * 0.621371
-    return speed_in_mph
-
-def kmh_to_ms(speed_in_kmh):                               # km/h konvertálása m/s-ba
-    speed_in_ms = speed_in_kmh / 3.6
-    return speed_in_ms
-
-
-
 # HUROK DEFINIÁLÁSA:
                                                                                                            
 while True:
@@ -269,7 +211,7 @@ while True:
             if s == 49:
                 print("PMS7003 indítása!")
 
-            veml = adafruit_veml6075.VEML6075(i2c, integration_time=100)    # UV értékek
+            veml = adafruit_veml6075.VEML6075(i2c, integration_time=100)    # UV értékek felolvasása
             store_uva.append(veml.uva)                                      # UVA tárolása
             store_uvb.append(veml.uvb)                                      # UVB tárolása
             store_uvi.append(veml.uv_index)                                 # UV-index tárolása
@@ -404,184 +346,40 @@ while True:
     print('PM10:            ', pm10, 'ug/m3')
     print(dt)
 
-    # WU küldött adatok formai követelményeinek összeállítása
-    ambient_temp_str = "{0:.2f}".format(degc_to_degf(ambient_temp))
-    humidity_str = "{0:.2f}".format(humidity)
-    pressure_in_str = "{0:.2f}".format(hpa_to_inches(pressure))
-    wind_speed_mph_str = "{0:.2f}".format(kmh_to_mph(wind_speed))
-    wind_gust_mph_str = "{0:.2f}".format(kmh_to_mph(wind_gust))
-    wind_average_str = "{0:.2f}".format(wind_average)
-    rainfall_in_str = "{0:.2f}".format(mm_to_inchesrh(rainfall))
-    dailyrain_in_str = "{0:.2f}".format(mm_to_inchesrd(dailyrain))
-    dewp_f_str = "{0:.2f}".format(dewpc_to_dewpf(dewp_c))
-    uvi_str = str("{0:.2f}".format(uv_index))
-    AqPM2_5_str = str("{0:.2f}".format(pm2_5))
-    AqPM10_str = str("{0:.2f}".format(pm10))
+    send_wu_data(dt,
+                 ambient_temp,
+                 humidity,
+                 p0,
+                 wind_speed,
+                 wind_gust,
+                 wind_average,
+                 rainfall,
+                 dailyrain,
+                 dewp_c,
+                 uv_index,
+                 pm2_5,
+                 pm10,
+                 softwaretype_str
+                 )
 
-    # Mért értékek kiíratása (WU-ra küldött):
-    print('\n')
-    print('Szélsebesség: ', wind_speed_mph_str, 'mph')
-    print('Széllökés :   ', wind_gust_mph_str, 'mph')
-    print('Szélirány:    ', wind_average_str,'°')
-    print('Órás eső:     ', rainfall_in_str, 'inch')
-    print('Napi eső:     ', dailyrain_in_str, 'inch')
-    print('Páratartalom: ', humidity_str, '%')
-    print('Légnyomás:    ', pressure_in_str, 'in')
-    print('Hőmérséklet:  ', ambient_temp_str, 'F°')
-    print('Harmatpont:   ', dewp_f_str, 'F°')
-    print('UV-index:     ', uvi_str)
-    print('PM2.5:        ', AqPM2_5_str, 'ug/m3')
-    print('PM10:         ', AqPM10_str, 'ug/m3')
-    print(dt)
-
-
-    # Adatküldés a www.wundwerground.com-ra
-    try:
-        r= requests.get(
-            WUurl +
-            WUcreds +
-            date_str +
-            "&winddir=" + wind_average_str +                    #[0-360°] pillanatnyi szélirány
-            "&windspeedmph=" + wind_speed_mph_str +             #[mph] azonnali szélsebesség
-            "&windgustmph=" + wind_gust_mph_str +               #[mph] aktuális széllökés, szoftverspecifikus időszak használatával
-        #   "&windgustdir=" + wind_gust_dir_str +                #[0-360°] szoftverspecifikus időszak használatával
-        #   "&windspdmph_avg2m=" + wind_speed_mph_avg2m_str +    #[mph] 2 perc átlagos szélsebesség
-        #   "&winddir_avg2m=" + wind_dir_avg2m_str +             #[0-360°] 2 perces átlagos szélirány
-        #   "&windgustmph_10m=" + wind_gust_mph_10m_str +        #[mph] 10 perces átlagos széllökés
-        #   "&windgustdir_10m=" + wind_gust_dir_10m_str +        #[0-360°] 10 perces átlagos szélirány
-            "&humidity=" + humidity_str +                       #[0-100%] kültéri páratartalom
-            "&dewptf=" + dewp_f_str +                           #[F°] kültéri harmatpont
-            "&tempf=" + ambient_temp_str +                      #[F°] kültéri hőmérséklet
-            "&rainin=" + rainfall_in_str +                      #[inch] az elmúlt órában esett eső
-            "&dailyrainin=" + dailyrain_in_str +                #[inch] az elmúlt napban esett eső az aktuális helyi idő szerint
-            "&baromin=" + pressure_in_str +                     #[inch] barometikus nyomás
-        #   "&weather=" + weather_str +                          #[szöveg] Lásd: METAR Wikipédia
-        #   "&clouds=" + clouds_str +                            #[szöveg] Lásd: METAR Wikipédia
-        #   "&soiltempf=" + soil_temp_str +                      #[F°] talajhőmérséklet
-        #   "&soilmoisture=" + soil_moisture_str +               #[0-100%] talajnedveség
-        #   "&leafwetness=" + leafwetness_str +                  #[0-100%] levélszárazság
-        #   "&solarradiation=" + solar_radiation_str +           #[W/m2] napsugárzás
-            "&UV=" + uvi_str +                                   #[index] UV-index
-        #   "&visibility=" + visiblity_str +                     #[nm] láthatóság
-        #   "&indoortempf=" + indoor_tempf_str +                 #[F°] beltéri hőmérséklet
-        #   "&indoorhumidity=" + indoor_humidity_str +           #[0-100%] beltéri páratartalom
-            "&AqPM2.5=" + AqPM2_5_str +                         #[ug/m3] PM 2.5 részecskék
-            "&AqPM10=" + AqPM10_str +                           #[ug/m3] PM 10 részecskék
-            "&softwaretype=" + softwaretype_str +
-            action_str)
-
+    """send_id_data(dt,
+                 ambient_temp,
+                 humidity,
+                 wind_average,
+                 wind_speed,
+                 wind_gust,
+                 dailyrain,
+                 rainfall,
+                 pressure,
+                 p0,
+                 uv_index,
+                 )"""
     
-        print("Received " + str(r.status_code) + " " + str(r.text))
-    except Exception as e:
-        print(e)
-        with open('/media/pi/B415-25E9/error.txt',mode='a') as ew:                
-         ew.write(str(dt) + str(e) + '\n')
-        server = smtplib.SMTP('smtp.gmail.com', port)
-        server.starttls()
-        server.login(username, password)
-        msg = ("Weaher Underground adatküldés hiba!", e)
-        server.sendmail(from_email, to_email, msg)
-        server.quit()
+    send_idpm_data(dt,
+                   pm2_5,
+                   pm10
+                   )
         
-
-#    # ID küldött adatok formai követelményeinek összeállítása
-#    year = dt.strftime("%Y")
-#    month = dt.strftime("%m")
-#    day = dt.strftime("%d")
-#    hour = dt.strftime("%H")
-#    minute = st.strftime("%M")
-#    secound = dt.strftime("%S")
-#    ambient_temp_ID_str = "{0:.2f}".format(ambient_temp)
-#    humidity_ID_str = "{0:.2f}".format(humidity)
-#    wind_average_ID_str = "{0:.2f}".format(wind_average)
-#    wind_speed_ms_str = "{0:.2f}".format(kmh_to_ms(wind_speed))
-#    wind_gust_ms_str = "{0:.2f}".format(kmh_to_ms(wind_gust))
-#    dailyrain_ID_str = "{0:.2f}".format(dailyrain)
-#    rainfall_ID_str = "{0:.2f}".format(rainfall)
-#    pressure_ID_str = "{0:.2f}".format(pressure)
-#    pressure0_ID_str = "{0:.2f}".format(p0)
-#    uv_index_ID_str = "{0:.2f}".format(uv_index)
-#    altitude_ID_str = "{0:.2f}".format(altitude)
-
-    # Mért értékek kiíratása (Időképre küldött):
-#    print('Szélsebesség: ', wind_speed_ms_str, 'm/s')
-#    print('Széllökés :   ', wind_gust_ms_str, 'm/s')
-#    print('Szélirány:    ', wind_average_ID_str,'°')
-#    print('Órás eső:     ', rainfall_ID_str, 'mm')
-#    print('Napi eső:     ', dailyrain_ID_str, 'mm')
-#    print('Páratartalom: ', humidity_ID_str, '%')
-#    print('Légnyomás:    ', pressure_ID_str, 'hPa')
-#    print('Légnyomás:    ', pressure0_ID_str, 'hPa')
-#    print('Hőmérséklet:  ', ambient_temp_ID_str, '°C')
-#    print('Magasság:     ', altitude_ID_str, 'm')
-#    print(dt)
-    
-    # Adatküldés a www.időkép.hu-ra
-#    try:
-    #    rid= requests.get(
-    #        ID_url +
-    #        ID_creds +
-    #        ID_utc +
-    #        ID_type +
-    #        "&ev=" + year +                                         # Év
-    #        "&honap=" + month +                                     # Hónap
-    #        "&nap=" + day +                                         # Nap
-    #        "&ora=" + hour +                                        # Óra
-    #        "&perc=" + minute +                                     # Perc
-    #        "&mp=" + secound +                                      # Másodperc
-    #        "&hom=" + ambient_temp_ID_str +                         # [°C] Hőmérséklet
-    #        "&rh=" + humidity_ID_str +                              # [0-100%] Páratartalom 
-    #        "&szelirany=" + wind_average_ID_str +                   # [0-360°] Szélitány
-    #        "&szelero=" + wind_speed_ms_str +                       # [m/s] Szélsebesség
-    #        "&szellokes=" + wind_gust_ms_str +                      # [m/s] Széllökés
-    #        "&csap=" + dailyrain_ID_str +                           # [mm] Az elmúlt 1 napban eset eső
-    #        "&csap1h=" + rainfall_ID_str +                          # [mm] Az elmúlt 1 órában esett eső
-    #        "&p=" + pressure0_ID_str +                              # [hPa] Tengerszintre számított légnyomás
-    #        "&ap=" + pressure_ID_str +                              # [hPa] Műszerszinti légnyomás
-    #        "&uv=" + uv_index_iD_str +                              # [index] UV-index
-    #        ID_action_str)
-
-#        print("Received " + str(rid.status_code) + " " + str(rid.text))
-#    except Exception as eid:
-#        print(eid)
-#        with open('/media/pi/B415-25E9/error.txt',mode='a') as ew:                
-#         ew.write(str(dt) + str(eid) + '\n')
-#        server = smtplib.SMTP('smtp.gmail.com', port)
-#        server.starttls()
-#        server.login(username, password)
-#        msg = ("Időkép adatküldés hiba!", eid)
-#        server.sendmail(from_email, to_email, msg)
-#        server.quit()
-
-
-    # Adatküldés a www.időkép.hu-ra, csak a PM értékek
-    timestamp = datetime.timestamp(dt)                              # UNIX timestamp előállítása és formázása
-    ts_str = "{0:.0f}".format(timestamp)
-
-    try:
-        ridpm = requests.get(
-            IDPM_url +
-            "id=" + IDPM_id +
-            "&pm25=" + AqPM2_5_str +
-            "&pm10=" + AqPM10_str +
-            "&varos=" + IDPM_varos +
-            "&helyseg=" + IDPM_helyseg +
-            "&eszaki=" + IDPM_eszel +
-            "&keleti=" + IDPM_khossz +
-            "&time=" + ts_str +
-            IDPM_action_str)
-        
-        print("Received " + str(ridpm.status_code) + " " + str(ridpm.text))
-    except Exception as eidpm:
-        print(eidpm)
-        with open('/media/pi/B415-25E9/error.txt',mode='a') as ew:                
-         ew.write(str(dt) + str(eidpm) + '\n')
-        server = smtplib.SMTP('smtp.gmail.com', port)
-        server.starttls()
-        server.login(username, password)
-        msg = ("Időkép PM adatküldés hiba!", eidpm)
-        server.sendmail(from_email, to_email, msg)
-        server.quit()
 
     # MySql adatfeltöltés
     try:

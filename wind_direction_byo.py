@@ -4,31 +4,7 @@ import math
 
 adc = MCP3008(channel = 0)
 count = 0
-values = []
-#volts = {0.4: 0.0,
-#         1.4: 22.5,
-#         1.2: 45.0,
-#         2.8: 67.5,
-#         2.7: 90.0,
-#         2.9: 112.5,
-#         2.2: 135.0,
-#         2.5: 157.5,
-#         1.8: 180.0,
-#         2.0: 202.5,
-#         0.7: 225.0,
-#         0.8: 247.5,
-#         0.1: 270.0,
-#         0.3: 292.5,
-#         0.2: 315.0,
-#         0.6: 337.5}
-
-#while True:
-#    wind = round(adc.value * 3.3, 1)
-#    if wind in volts:
-#        print('Talalat:' + str(wind) + ' ' + str(volts[wind]))   
-#    else:
-#        print('Ismeretlen ertek: ' + str(wind))
-        
+values = []      
 
 def get_average(angles):
     sin_sum = 0.0
